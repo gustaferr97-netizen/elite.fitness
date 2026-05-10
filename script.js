@@ -105,6 +105,35 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 // 5. Shopping Cart Logic
 // ==========================================
 const cartState = [];
+
+// Estoque inicial lido dos data-stock de cada botão
+const stockState = {};
+document.querySelectorAll('.btn-add-cart').forEach(btn => {
+    stockState[btn.getAttribute('data-id')] = parseInt(btn.getAttribute('data-stock'));
+});
+
+function updateStockUI(id) {
+    const btn = document.querySelector(`.btn-add-cart[data-id="${id}"]`);
+    if (!btn) return;
+    const qty = stockState[id];
+    const stockLabel = btn.closest('.product-info').querySelector('.stock-label');
+    const stockDot = btn.closest('.product-info').querySelector('.stock-dot');
+
+    if (qty <= 0) {
+        btn.disabled = true;
+        btn.textContent = 'Esgotado';
+        btn.classList.add('out-of-stock');
+        stockLabel.textContent = 'Sem estoque';
+        stockDot.classList.add('empty');
+    } else if (qty <= 3) {
+        stockLabel.textContent = `Últimas ${qty} unidade${qty > 1 ? 's' : ''}!`;
+        stockDot.classList.add('low');
+        stockDot.classList.remove('empty');
+    } else {
+        stockLabel.textContent = `${qty} unidades disponíveis`;
+        stockDot.classList.remove('low', 'empty');
+    }
+}
 const floatingCart = document.getElementById('floatingCart');
 const cartSidebar = document.getElementById('cartSidebar');
 const cartOverlay = document.getElementById('cartOverlay');
@@ -159,21 +188,24 @@ document.querySelectorAll('.btn-add-cart').forEach(button => {
         const id = this.getAttribute('data-id');
         const name = this.getAttribute('data-name');
         const price = parseFloat(this.getAttribute('data-price'));
-        // get image from closest product card
         const card = this.closest('.product-card');
         const image = card.querySelector('.product-image img').getAttribute('src');
 
+        // Verifica estoque
+        if (stockState[id] <= 0) return;
+
+        // Decrementa estoque
+        stockState[id]--;
+        updateStockUI(id);
+
         const existingItem = cartState.find(item => item.id === id);
-        
         if (existingItem) {
             existingItem.quantity += 1;
         } else {
             cartState.push({ id, name, price, quantity: 1, image });
         }
-        
+
         updateCartUI();
-        
-        // Notify user with a small animation on floating cart
         gsap.fromTo(floatingCart, { scale: 1.15, y: -10 }, { scale: 1, y: 0, duration: 0.4, ease: "back.out(1.7)" });
     });
 });
@@ -287,15 +319,42 @@ if (window.matchMedia('(max-width: 768px)').matches || ('ontouchstart' in window
 // Remove item event delegation
 cartItemsContainer.addEventListener('click', function(e) {
     if (e.target.classList.contains('cart-item-remove')) {
-        const index = e.target.getAttribute('data-index');
+        const index = parseInt(e.target.getAttribute('data-index'));
         const item = cartState[index];
-        
+
+        // Devolve 1 unidade ao estoque
+        stockState[item.id]++;
+        updateStockUI(item.id);
+
         if (item.quantity > 1) {
             item.quantity -= 1;
         } else {
             cartState.splice(index, 1);
         }
-        
+
         updateCartUI();
     }
+});
+
+// Finalizar compra — envia mensagem para WhatsApp
+document.getElementById('btnCheckout').addEventListener('click', function() {
+    if (cartState.length === 0) return;
+
+    const numero = '5598984787905';
+
+    let mensagem = '🛒 *Olá! Gostaria de finalizar meu pedido na Elite Fitness:*\n\n';
+
+    cartState.forEach(item => {
+        const subtotal = (item.price * item.quantity).toFixed(2);
+        mensagem += `▪ *${item.name}*\n`;
+        mensagem += `   Qtd: ${item.quantity} × R$ ${item.price.toFixed(2)} = R$ ${subtotal}\n\n`;
+    });
+
+    const total = cartState.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    mensagem += `━━━━━━━━━━━━━━━\n`;
+    mensagem += `💰 *Total: R$ ${total.toFixed(2)}*\n\n`;
+    mensagem += `Aguardo confirmação para pagamento. Obrigado! 😊`;
+
+    const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`;
+    window.open(url, '_blank');
 });
