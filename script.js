@@ -54,6 +54,7 @@ fadeElements.forEach(elem => {
         opacity: 0,
         duration: isMobile ? 0.5 : 0.7,
         ease: "power3.out",
+        clearProps: "opacity,transform",
         scrollTrigger: {
             trigger: elem,
             start: (isMobile && isCard) ? "top 105%" : "top 90%",
@@ -105,35 +106,6 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 // 5. Shopping Cart Logic
 // ==========================================
 const cartState = [];
-
-// Estoque inicial lido dos data-stock de cada botão
-const stockState = {};
-document.querySelectorAll('.btn-add-cart').forEach(btn => {
-    stockState[btn.getAttribute('data-id')] = parseInt(btn.getAttribute('data-stock'));
-});
-
-function updateStockUI(id) {
-    const btn = document.querySelector(`.btn-add-cart[data-id="${id}"]`);
-    if (!btn) return;
-    const qty = stockState[id];
-    const stockLabel = btn.closest('.product-info').querySelector('.stock-label');
-    const stockDot = btn.closest('.product-info').querySelector('.stock-dot');
-
-    if (qty <= 0) {
-        btn.disabled = true;
-        btn.textContent = 'Esgotado';
-        btn.classList.add('out-of-stock');
-        stockLabel.textContent = 'Sem estoque';
-        stockDot.classList.add('empty');
-    } else if (qty <= 3) {
-        stockLabel.textContent = `Últimas ${qty} unidade${qty > 1 ? 's' : ''}!`;
-        stockDot.classList.add('low');
-        stockDot.classList.remove('empty');
-    } else {
-        stockLabel.textContent = `${qty} unidades disponíveis`;
-        stockDot.classList.remove('low', 'empty');
-    }
-}
 const floatingCart = document.getElementById('floatingCart');
 const cartSidebar = document.getElementById('cartSidebar');
 const cartOverlay = document.getElementById('cartOverlay');
@@ -168,7 +140,7 @@ function updateCartUI() {
                 <img src="${item.image}" alt="${item.name}" class="cart-item-image">
                 <div class="cart-item-info">
                     <h4>${item.name}</h4>
-                    <p class="cart-item-price">R$ ${item.price}</p>
+                    <p class="cart-item-price">R$ ${item.price.toFixed(2).replace('.', ',')}</p>
                     <div class="cart-item-qty">Qtd: ${item.quantity}</div>
                 </div>
                 <button class="cart-item-remove" data-index="${index}">&times;</button>
@@ -179,7 +151,7 @@ function updateCartUI() {
 
     // Update total
     const total = cartState.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-    cartTotalElement.textContent = `R$ ${total.toFixed(2)}`;
+    cartTotalElement.textContent = `R$ ${total.toFixed(2).replace('.', ',')}`;
 }
 
 // Add to cart event
@@ -187,25 +159,23 @@ document.querySelectorAll('.btn-add-cart').forEach(button => {
     button.addEventListener('click', function() {
         const id = this.getAttribute('data-id');
         const name = this.getAttribute('data-name');
-        const price = parseFloat(this.getAttribute('data-price'));
+        const priceStr = this.getAttribute('data-price').replace(',', '.');
+        const price = parseFloat(priceStr);
+        // get image from closest product card
         const card = this.closest('.product-card');
         const image = card.querySelector('.product-image img').getAttribute('src');
 
-        // Verifica estoque
-        if (stockState[id] <= 0) return;
-
-        // Decrementa estoque
-        stockState[id]--;
-        updateStockUI(id);
-
         const existingItem = cartState.find(item => item.id === id);
+        
         if (existingItem) {
             existingItem.quantity += 1;
         } else {
             cartState.push({ id, name, price, quantity: 1, image });
         }
-
+        
         updateCartUI();
+        
+        // Notify user with a small animation on floating cart
         gsap.fromTo(floatingCart, { scale: 1.15, y: -10 }, { scale: 1, y: 0, duration: 0.4, ease: "back.out(1.7)" });
     });
 });
@@ -305,6 +275,21 @@ function initMobileEffects() {
             }
         });
     });
+
+    // --- Awards card ---
+    document.querySelectorAll('.awards-image-container').forEach(card => {
+        const img = card.querySelector('img');
+        gsap.set(img, { scale: 1 });
+        ScrollTrigger.create({
+            trigger: card,
+            start: "top 100%",
+            once: true,
+            onEnter: () => {
+                gsap.to(img, { scale: 1.04, duration: 0.9, ease: "power2.out" });
+                mobileTilt(card);
+            }
+        });
+    });
 }
 
 // Roda no mobile real e também quando DevTools simula mobile
@@ -319,42 +304,217 @@ if (window.matchMedia('(max-width: 768px)').matches || ('ontouchstart' in window
 // Remove item event delegation
 cartItemsContainer.addEventListener('click', function(e) {
     if (e.target.classList.contains('cart-item-remove')) {
-        const index = parseInt(e.target.getAttribute('data-index'));
+        const index = e.target.getAttribute('data-index');
         const item = cartState[index];
-
-        // Devolve 1 unidade ao estoque
-        stockState[item.id]++;
-        updateStockUI(item.id);
-
+        
         if (item.quantity > 1) {
             item.quantity -= 1;
         } else {
             cartState.splice(index, 1);
         }
-
+        
         updateCartUI();
     }
 });
 
-// Finalizar compra — envia mensagem para WhatsApp
-document.getElementById('btnCheckout').addEventListener('click', function() {
-    if (cartState.length === 0) return;
+// ==========================================
+// 7. Ver Mais Produtos
+// ==========================================
+const btnVerMais = document.getElementById('btnVerMais');
+const storeGridExtra = document.getElementById('storeGridExtra');
 
-    const numero = '5598984787905';
+if (btnVerMais && storeGridExtra) {
+    btnVerMais.addEventListener('click', function () {
+        const aberto = storeGridExtra.classList.contains('visible');
 
-    let mensagem = '🛒 *Olá! Gostaria de finalizar meu pedido na Elite Fitness:*\n\n';
-
-    cartState.forEach(item => {
-        const subtotal = (item.price * item.quantity).toFixed(2);
-        mensagem += `▪ *${item.name}*\n`;
-        mensagem += `   Qtd: ${item.quantity} × R$ ${item.price.toFixed(2)} = R$ ${subtotal}\n\n`;
+        if (!aberto) {
+            storeGridExtra.classList.add('visible');
+            btnVerMais.classList.add('aberto');
+            btnVerMais.querySelector('span').textContent = 'Ver menos';
+        } else {
+            storeGridExtra.classList.remove('visible');
+            btnVerMais.classList.remove('aberto');
+            btnVerMais.querySelector('span').textContent = 'Ver mais produtos';
+        }
     });
+}
 
-    const total = cartState.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-    mensagem += `━━━━━━━━━━━━━━━\n`;
-    mensagem += `💰 *Total: R$ ${total.toFixed(2)}*\n\n`;
-    mensagem += `Aguardo confirmação para pagamento. Obrigado! 😊`;
+// ==========================================
+// 9. Botões Assinar & Payment Modal
+// ==========================================
+const numeroAcademia = '5598984787905';
 
-    const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`;
-    window.open(url, '_blank');
+const paymentOverlay = document.getElementById('paymentOverlay');
+const paymentModal = document.getElementById('paymentModal');
+const closePaymentBtn = document.getElementById('closePayment');
+const btnConfirmPayment = document.getElementById('btnConfirmPayment');
+const paymentMethodInputs = document.querySelectorAll('input[name="paymentMethod"]');
+const installmentsWrapper = document.getElementById('installmentsWrapper');
+const installmentsSelect = document.getElementById('installments');
+const cardOptionLabel = document.getElementById('cardOptionLabel');
+
+let pendingCheckout = null; 
+// { type: 'plan' | 'cart', maxInstallments: number, data: any }
+
+function closePaymentModal() {
+    paymentOverlay.classList.remove('active');
+    paymentModal.classList.remove('active');
+    pendingCheckout = null;
+}
+
+if (closePaymentBtn) closePaymentBtn.addEventListener('click', closePaymentModal);
+if (paymentOverlay) paymentOverlay.addEventListener('click', closePaymentModal);
+
+const cardTypeWrapper = document.getElementById('cardTypeWrapper');
+const cardTypeInputs = document.querySelectorAll('input[name="cardType"]');
+
+function updateInstallmentsVisibility() {
+    const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked');
+    const cardType = document.querySelector('input[name="cardType"]:checked').value;
+    
+    if (paymentMethod && paymentMethod.value === 'cartao') {
+        cardTypeWrapper.style.display = 'block';
+        if (cardType === 'credito' && pendingCheckout && pendingCheckout.maxInstallments >= 1) {
+            installmentsWrapper.style.display = 'block';
+        } else {
+            installmentsWrapper.style.display = 'none';
+        }
+    } else {
+        cardTypeWrapper.style.display = 'none';
+        installmentsWrapper.style.display = 'none';
+    }
+}
+
+function openPaymentModal(type, maxInstallments, data) {
+    pendingCheckout = { type, maxInstallments, data };
+    
+    // Reset selections and hide footer
+    paymentMethodInputs.forEach(input => input.checked = false);
+    cardTypeInputs.forEach(input => {
+        if (input.value === 'credito') input.checked = true;
+    });
+    document.querySelector('.payment-footer').style.display = 'none';
+    cardTypeWrapper.style.display = 'none';
+    installmentsWrapper.style.display = 'none';
+    
+    if (maxInstallments > 1) {
+        installmentsSelect.innerHTML = '';
+        for (let i = 1; i <= maxInstallments; i++) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = `${i}x`;
+            installmentsSelect.appendChild(opt);
+        }
+    } else if (maxInstallments === 1) {
+        installmentsSelect.innerHTML = '<option value="1">1x (À vista)</option>';
+    }
+
+    paymentOverlay.classList.add('active');
+    paymentModal.classList.add('active');
+}
+
+paymentMethodInputs.forEach(input => {
+    input.addEventListener('change', function() {
+        document.querySelector('.payment-footer').style.display = 'block';
+        updateInstallmentsVisibility();
+    });
 });
+
+cardTypeInputs.forEach(input => {
+    input.addEventListener('change', updateInstallmentsVisibility);
+});
+
+document.querySelectorAll('.plan-card .btn-primary, .plan-card .btn-secondary').forEach(btn => {
+    btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        const card = this.closest('.plan-card');
+        const plano = card.querySelector('h3').textContent.trim();
+        const preco = card.querySelector('.price').childNodes[0].textContent.trim();
+        
+        let maxInstallments = 1; // Default 1x (à vista)
+        
+        if (card.classList.contains('pro')) {
+            const htmlStr = card.innerHTML.toLowerCase();
+            const match = htmlStr.match(/até (\d+)x/);
+            if (match && match[1]) {
+                maxInstallments = parseInt(match[1]);
+            }
+        }
+
+        const data = { plano, preco };
+        openPaymentModal('plan', maxInstallments, data);
+    });
+});
+
+const btnCheckout = document.getElementById('btnCheckout');
+if (btnCheckout) {
+    btnCheckout.addEventListener('click', function () {
+        if (cartState.length === 0) return;
+        
+        const totalItems = cartState.reduce((acc, item) => acc + item.quantity, 0);
+        let maxInstallments = 1;
+        
+        if (totalItems === 2) {
+            maxInstallments = 2;
+        } else if (totalItems >= 3) {
+            maxInstallments = 3;
+        }
+
+        openPaymentModal('cart', maxInstallments, null);
+    });
+}
+
+if (btnConfirmPayment) {
+    btnConfirmPayment.addEventListener('click', function() {
+        if (!pendingCheckout) return;
+
+        let totalValue = 0;
+
+        if (pendingCheckout.type === 'plan') {
+            const { preco } = pendingCheckout.data;
+            const parsed = parseFloat(preco.replace(/[^\d,-]/g, '').replace(',', '.'));
+            if (!isNaN(parsed)) {
+                totalValue = parsed;
+            }
+        } else if (pendingCheckout.type === 'cart') {
+            totalValue = cartState.reduce((acc, item) => acc + item.price * item.quantity, 0);
+        }
+
+        const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
+        let paymentInfo = '';
+        if (paymentMethod === 'pix') paymentInfo = 'Pix';
+        else if (paymentMethod === 'dinheiro') paymentInfo = 'Dinheiro';
+        else if (paymentMethod === 'cartao') {
+            const cardType = document.querySelector('input[name="cardType"]:checked').value;
+            if (cardType === 'debito') {
+                paymentInfo = 'Cartão de Débito (À vista)';
+            } else {
+                paymentInfo = 'Cartão de Crédito';
+                const installments = parseInt(installmentsSelect.value) || 1;
+                if (totalValue > 0) {
+                    const valorParcela = (totalValue / installments).toFixed(2).replace('.', ',');
+                    paymentInfo += ` (${installments}x de R$ ${valorParcela})`;
+                } else {
+                    paymentInfo += ` (${installments}x)`;
+                }
+            }
+        }
+
+        let mensagem = '';
+
+        if (pendingCheckout.type === 'plan') {
+            const { plano, preco } = pendingCheckout.data;
+            mensagem = `Olá! Tenho interesse em assinar o plano *${plano}* (${preco}) da Elite Fit.\n\nForma de pagamento escolhida: *${paymentInfo}*`;
+        } else if (pendingCheckout.type === 'cart') {
+            const itens = cartState.map(item =>
+                `• ${item.name} (x${item.quantity}) — R$ ${(item.price * item.quantity).toFixed(2).replace('.', ',')}`
+            ).join('\n');
+            
+            mensagem = `Olá! Gostaria de realizar o seguinte pedido pela Elite Fit:\n\n${itens}\n\n*Total: R$ ${totalValue.toFixed(2).replace('.', ',')}*\n\nForma de pagamento escolhida: *${paymentInfo}*`;
+        }
+
+        const url = `https://wa.me/${numeroAcademia}?text=${encodeURIComponent(mensagem)}`;
+        window.location.href = url;
+        closePaymentModal();
+    });
+}
